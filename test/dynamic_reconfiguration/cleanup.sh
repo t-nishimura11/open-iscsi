@@ -1,31 +1,35 @@
 #!/bin/bash
-set -ue
+set -u
 
 PORTAL="localhost"
-TARGETNAME=""
+TARGETNAME="test.local:target01"
+
+. ./common-function
 
 # logout
-if [ -n "${TARGETNAME}" -a -n "${PORTAL}" ]; then 
-	iscsiadm --mode=node --logout --targetname="${TARGETNAME}"\
-		--portal="${PORTAL}"
-elif [ -n "${TARGETNAME}" ]; then
-	iscsiadm --mode=node --logout --targetname="${TARGETNAME}"
-elif [ -n "${PORTAL}" ]; then
-	iscsiadm --mode=node --logout --portal="${PORTAL}"
-else
-	iscsiadm --mode=node --logout
-fi
+iscsiadm --mode=node --logout --targetname="${TARGETNAME}" --portal="${PORTAL}"
+
+# check sesstion
+iscsiadm --node=session
 
 # delete
-if [ -n "${TARGETNAME}" ]; then
-	iscsiadm --mode=node --op=delete --targetname="${TARGETNAME}"
-elif [ -n "${PORTAL}" ]; then
-	iscsiadm --mode=node --op=delete --portal="${PORTAL}"
-else
-	iscsiadm --mode=node --op=delete
-fi
+iscsiadm --mode=node --op=delete --targetname="${TARGETNAME}" \
+	--portal="${PORTAL}"
 
 # check node
 iscsiadm --mode=node
 
-setenforce 1
+# cleanup target
+mv -f /etc/tgt/targets.conf.bak /etc/tgt/targets.conf
+if [ -f /tmp/not_started_tgtd ]; then
+	rm -f /tmp/not_started_tgtd
+	service_ctl tgtd stop
+else
+	service_ctl tgtd restart
+fi
+rm -f /tmp/target01.img
+if [ -f /tmp/no-scsi-target-utils ]; then
+	yum remove -y scsi-target-utils
+	rm -f /tmp/no-scsi-target-utils
+fi
+setenforce 1 

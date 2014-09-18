@@ -1,0 +1,43 @@
+#!/bin/bash
+
+function service_ctl() {
+	local cmnd=systemctl
+	local service=$1
+	local op=$2
+
+	if [ $# -eq 1 ] && [ "$1" = "list" ]; then
+			local ret=0
+			op=list-unit-files
+			[ -x /sbin/chkconfig ] && \
+				{ chkconfig --list || ret=$?; }
+			[ -x /usr/bin/systemctl ] && { $cmnd $op || ret=$?; }
+			return $ret
+	fi
+
+	# service control by systemd
+	if [ -e /lib/systemd/system/${service}.service ]; then
+			if [ "$op" = "list" ]; then
+					$cmnd list-unit-files | grep "$service"
+					return $?
+			fi
+			$cmnd $op ${service}.service
+			return $?
+	fi
+
+	# service control by sysvinit or upstart
+	cmnd=service
+	if [ "$op" == "enable" ]; then
+			cmnd=chkconfig
+			op=on
+	elif [ "$op" == "disable" ]; then
+			cmnd=chkconfig
+			op=off
+	elif [ "$op" == "list" ]; then
+			cmnd=chkconfig
+			op="--list"
+	fi
+
+	$cmnd $service $op
+	return $?
+}
+
