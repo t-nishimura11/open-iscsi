@@ -13,18 +13,20 @@ while getopts n:v: OPT ; do
 	esac
 done
 
-TEMP_BEFORE=`mktemp /tmp/iscsi_params_before.XXXX`
-TEMP_AFTER=`mktemp /tmp/iscsi_params_after.XXXX`
+TEMP=$(mktemp)
 
 # get before params
-iscsiadm --mode=session -d 8 2>${TEMP_BEFORE}
+iscsiadm --mode=session -d 8 2>${TEMP}.before
 
 # change param value
 iscsiadm --mode=session --op=update --name="${PARAM_NAME}"\
 	 --value="${PARAM_VALUE}"
 
 # get after params
-iscsiadm --mode=session -d 8 2>${TEMP_AFTER}
+iscsiadm --mode=session -d 8 2>${TEMP}.after
 
-diff -up ${TEMP_BEFORE} ${TEMP_AFTER}
-rm -rf ${TEMP_BEFORE} ${TEMP_AFTER}
+diff -up ${TEMP}.before ${TEMP}.after > ${TEMP}.diff.${PARAM_NAME}
+if [ "$(cat ${TEMP}.diff.${PARAM_NAME} | wc -l)" -eq 0 ] ; then
+	echo "FAIL: ${PARAM_NAME} not updated."
+fi
+rm -rf ${TEMP}*
