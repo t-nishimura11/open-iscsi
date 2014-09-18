@@ -21,15 +21,18 @@ iscsiadm --mode=node
 
 # cleanup target
 mv -f /etc/tgt/targets.conf.bak /etc/tgt/targets.conf
-if [ -f /tmp/not_started_tgtd ]; then
+if [ -f /tmp/not_started_tgtd ] ; then
 	rm -f /tmp/not_started_tgtd
 	service_ctl tgtd stop
 else
 	service_ctl tgtd restart
 fi
 rm -f /tmp/target01.img
-if [ -f /tmp/no-scsi-target-utils ]; then
+if [ -f /tmp/no-scsi-target-utils ] ; then
 	yum remove -y scsi-target-utils
 	rm -f /tmp/no-scsi-target-utils
 fi
-setenforce 1 
+if [ -f /tmp/Enforcing ] ; then
+	setenforce 1 
+	rm -f /tmp/Enforcing
+fi

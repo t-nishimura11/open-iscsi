@@ -7,7 +7,10 @@ TARGETNAME="test.local:target01"
 . ./common-function
 
 # setup target
-setenforce 0
+if [ `getenforced` == "Enforcing" ] ; then
+	setenforce 0
+	touch /tmp/Enforcing
+fi
 if ! rpm -q scsi-target-utils ; then
 	touch /tmp/no-scsi-target-utils
 	yum install -y scsi-target-utils
