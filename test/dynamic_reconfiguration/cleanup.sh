@@ -10,7 +10,7 @@ TARGETNAME="test.local:target01"
 iscsiadm --mode=node --logout --targetname="${TARGETNAME}" --portal="${PORTAL}"
 
 # check sesstion
-iscsiadm --node=session
+iscsiadm --mode=session
 
 # delete
 iscsiadm --mode=node --op=delete --targetname="${TARGETNAME}" \
@@ -20,7 +20,9 @@ iscsiadm --mode=node --op=delete --targetname="${TARGETNAME}" \
 iscsiadm --mode=node
 
 # cleanup target
-mv -f /etc/tgt/targets.conf.bak /etc/tgt/targets.conf
+if [ -f /etc/tgt/targets.conf.bak ] ; then
+	mv -f /etc/tgt/targets.conf.bak /etc/tgt/targets.conf
+fi
 if [ -f /tmp/not_started_tgtd ] ; then
 	rm -f /tmp/not_started_tgtd
 	service_ctl tgtd stop
