@@ -295,6 +295,39 @@ mgmt_ipc_notify_common(queue_task_t *qtask, int (*handler)(int, char **))
 	return ISCSI_SUCCESS;
 }
 
+static int mgmt_ipc_session_update(queue_task_t *qtask)
+{
+	int sid = qtask->req.u.session.sid;
+	node_rec_t *rec = &qtask->req.u.session.rec;
+	iscsi_session_t *session;
+	struct iscsi_conn *conn;
+	conn_rec_t *conn_rec;
+	int rc;
+
+	log_debug(4, "DEBUG %s: enter", __FUNCTION__);
+	if (!(session = session_find_by_sid(sid)))
+		return ISCSI_ERR_SESS_NOT_FOUND;
+
+	conn = &session->conn[0];
+	conn_rec = &session->nrec.conn[0];
+
+	/* change param example */
+	session->replacement_timeout = rec->session.timeo.replacement_timeout;
+	session->abort_timeout = rec->session.err_timeo.abort_timeout;
+	conn->noop_out_timeout = rec->conn[0].timeo.noop_out_timeout;
+	conn->noop_out_interval = rec->conn[0].timeo.noop_out_interval;
+
+	rc = iscsi_session_set_params(conn);
+	if (rc) {
+		log_error("%s: IPC error %d session [%02d]", __FUNCTION__,
+			rc, sid);
+			return ISCSI_ERR_INTERNAL;
+	}
+
+	mgmt_ipc_write_rsp(qtask, ISCSI_SUCCESS);
+	return ISCSI_SUCCESS;
+}
+
 /* Replace these dummies as you implement them
    elsewhere */
 static int
@@ -529,6 +562,7 @@ static mgmt_ipc_fn_t *	mgmt_ipc_functions[__MGMT_IPC_MAX_COMMAND] = {
 [MGMT_IPC_NOTIFY_DEL_NODE]	= mgmt_ipc_notify_del_node,
 [MGMT_IPC_NOTIFY_ADD_PORTAL]	= mgmt_ipc_notify_add_portal,
 [MGMT_IPC_NOTIFY_DEL_PORTAL]	= mgmt_ipc_notify_del_portal,
+[MGMT_IPC_SESSION_UPDATE]      = mgmt_ipc_session_update,
 };
 
 void mgmt_ipc_handle(int accept_fd)
