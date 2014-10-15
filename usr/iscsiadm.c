@@ -3209,58 +3209,6 @@ ping_exit:
 	return rc;
 }
 
-static int session_update(node_rec_t *rec, struct session_info *info)
-{
-	int rc;
-	iscsiadm_req_t req;
-	iscsiadm_rsp_t rsp;
-
-	if (!iscsi_match_session(rec, info))
-		return -1;
-
-	if (idbm_rec_read(&rec, info->targetname, info->tpgt,
-			  info->persistent_address,
-			  info->persistent_port, &info->iface)) {
-		/*
-		 * this is due to a HW driver or some other driver
-		 * not hooked in
-		 */
-		log_debug(7, "could not read data for [%s,%s.%d]\n",
-		info->targetname, info->persistent_address,
-		info->persistent_port);
-		return -1;
-	}
-
-	req.command = MGMT_IPC_SESSION_UPDATE;
-	req.u.session.sid = info->sid;
-	memcpy(&req.u.session.rec, rec, sizeof(node_rec_t));
-
-	rc = iscsid_exec_req(&req, &rsp, 1);
-	if (rc)
-		return rc;
-
-	printf("Session update [sid: %d, target: %s, portal: "
-		"%s,%d]\n",
-		info->sid, info->targetname, info->persistent_address,
-		info->port);
-
-	return 0;
-}
-
-static int exec_session_op(struct node_rec *rec)
-{
-	int rc = 0;
-
-	if (rec)
-		log_debug(2, "%s: %s:%s node [%s,%s,%d] sid %u", __FUNCTION__,
-			rec->iface.transport_name, rec->iface.name,
-			rec->name, rec->conn[0].address, rec->conn[0].port,
-			rec->session.sid);
-
-	rc = for_each_session(rec, session_update, 0);
-	return rc;
-}
-
 int
 main(int argc, char **argv)
 {
@@ -3707,10 +3655,6 @@ free_info:
 			free(info);
 			goto out;
 		} else {
-			if (op == OP_UPDATE) {
-				rc = exec_session_op(rec);
-				goto out;
-			}
 			if (op == OP_NEW) {
 				log_error("session mode: Operation 'new' only "
 					  "allowed with specific session IDs");
