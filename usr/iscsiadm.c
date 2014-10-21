@@ -58,10 +58,6 @@
 static char program_name[] = "iscsiadm";
 static char config_file[TARGET_NAME_MAXLEN];
 extern struct iscsi_ipc *ipc;
-static struct iscsi_rec_params {
-	struct node_rec		*rec;
-	struct list_head	*params;
-};
 
 enum iscsiadm_mode {
 	MODE_DISCOVERY,
@@ -3213,159 +3209,6 @@ ping_exit:
 	return rc;
 }
 
-static int
-session_update(struct iscsi_rec_params *rec_params, struct session_info *info)
-{
-	int rc;
-	node_rec_t *rec;
-        struct list_head *params = rec_params->params;
-	struct user_param *param;
-	iscsiadm_req_t req;
-	iscsiadm_req_t rsp;
-	int *sysfs_param;
-	char s_id[NAME_SIZE], c_id[NAME_SIZE];
-
-	if (!rec_params->rec) {
-		rec_params->rec = idbm_create_rec(info->targetname, info->tpgt,
-					info->persistent_address,
-					info->persistent_port, &info->iface, 1);
-		rec = rec_params->rec;
-		rec->session.info = info;
-		rec->session.sid = info->sid;
-	}
-
-	rc = verify_node_params(params, rec);
-	if (rc)
-		return rc;
-
-	rec->session.timeo.replacement_timeout = info->tmo.recovery_tmo;
-	rec->session.err_timeo.abort_timeout = info->tmo.abort_tmo;
-	rec->session.err_timeo.lu_reset_timeout = info->tmo.lu_reset_tmo;
-	rec->session.err_timeo.tgt_reset_timeout = info->tmo.tgt_reset_tmo;
-
-	snprintf(s_id, sizeof(s_id), "session%d", info->sid);
-	sysfs_get_int(s_id, "iscsi_session", "fast_abort",
-			&rec->session.iscsi.FastAbort);
-
-	snprintf(c_id, sizeof(c_id), "connection%d:0", info->sid);
-	sysfs_get_int(c_id, "iscsi_connection", "ping_tmo",
-			&rec->conn[0].timeo.noop_out_timeout);
-	sysfs_get_int(c_id, "iscsi_connection", "recv_tmo",
-			&rec->conn[0].timeo.noop_out_interval);
-
-	list_for_each_entry(param, params, list) {
-		if (strcmp(param->name,
-			"node.session.timeo.replacement_timeout") == 0) {
-			rec->session.timeo.replacement_timeout =
-				strtoul(param->value, NULL, 10);
-		} else if (strcmp(param->name,
-			"node.session.iscsi.FastAbort") == 0) {
-			if (strcmp(param->value, "Yes") == 0) {
-				rec->session.iscsi.FastAbort = 1;
-			} else if (strcmp(param->value, "No") == 0) {
-				rec->session.iscsi.FastAbort = 0;
-			}
-		} else if (strcmp(param->name,
-			"node.session.err_timeo.abort_timeout") == 0) {
-			rec->session.err_timeo.abort_timeout =
-				strtoul(param->value, NULL, 10);
-		} else if (strcmp(param->name,
-			"node.session.err_timeo.lu_reset_timeout") == 0) {
-			rec->session.err_timeo.lu_reset_timeout =
-				strtoul(param->value, NULL, 10);
-		} else if (strcmp(param->name,
-			"node.session.err_timeo.tgt_reset_timeout") == 0) {
-			rec->session.err_timeo.tgt_reset_timeout =
-				strtoul(param->value, NULL, 10);
-		} else if (strcmp(param->name,
-			"node.conn[0].timeo.noop_out_timeout") == 0) {
-			rec->conn[0].timeo.noop_out_timeout =
-				strtoul(param->value, NULL, 10);
-		} else if (strcmp(param->name,
-			"node.conn[0].timeo.noop_out_interval")	== 0) {
-			rec->conn[0].timeo.noop_out_interval =
-				strtoul(param->value, NULL, 10);
-		} else {
-			printf("%s is not supported in session update\n",
-				param->name);
-			return -1;
-		}
-	}
-
-
-	req.command = MGMT_IPC_SESSION_UPDATE;
-	req.u.session.sid = info->sid;
-	memcpy(&req.u.session.rec, rec, sizeof(node_rec_t));
-
-	rc = iscsid_exec_req(&req, &rsp, 1);
-	if (rc)
-		return rc;
-
-	/* wait for update session done in kernel */
-	snprintf(s_id, sizeof(s_id), "session%d", rec->session.sid);
-	snprintf(c_id, sizeof(c_id), "connection%d:0", rec->session.sid);
-	sysfs_cleanup();
-	while (1){
-		usleep(10000);
-		sysfs_get_int(s_id, "iscsi_session", "recovery_tmo",
-								&sysfs_param);
-		if (sysfs_param != rec->session.timeo.replacement_timeout)
-			continue;
-		sysfs_get_int(s_id, "iscsi_session", "fast_abort",
-								&sysfs_param);
-		if (sysfs_param != rec->session.iscsi.FastAbort)
-			continue;
-		sysfs_get_int(s_id, "iscsi_session", "abort_tmo",
-								&sysfs_param);
-		if (sysfs_param != rec->session.err_timeo.abort_timeout)
-			continue;
-		sysfs_get_int(s_id, "iscsi_session", "lu_reset_tmo",
-								&sysfs_param);
-		if (sysfs_param != rec->session.err_timeo.lu_reset_timeout)
-			continue;
-		sysfs_get_int(s_id, "iscsi_session", "tgt_reset_tmo",
-								&sysfs_param);
-		if (sysfs_param != rec->session.err_timeo.tgt_reset_timeout)
-			continue;
-		sysfs_get_int(c_id, "iscsi_connection", "ping_tmo",
-								&sysfs_param);
-		if (sysfs_param != rec->conn[0].timeo.noop_out_timeout)
-			continue;
-		sysfs_get_int(c_id, "iscsi_connection", "recv_tmo",
-								&sysfs_param);
-		if (sysfs_param != rec->conn[0].timeo.noop_out_interval)
-			continue;
-		break;
-	}
-
-	printf("Session update is done [sid: %d, target: %s, portal: %s,%d]\n",
-		info->sid, info->targetname, info->persistent_address,
-		info->port);
-
-	return rc;
-}
-
-static int session_update_all(struct list_head *params)
-{
-	int rc, num_found = 0;
-	struct iscsi_rec_params rec_params;
-
-	rec_params.params = params;
-
-	rc = iscsi_sysfs_for_each_session(&rec_params, &num_found,
-					session_update, 1);
-	if (rc) {
-		log_error("Could not execute operation on all sessions: %s",
-			iscsi_err_to_str(rc));
-		goto out;
-	} else if (!num_found) {
-		log_error("No session found.");
-		rc = ISCSI_ERR_NO_OBJS_FOUND;
-	}
-out:
-	return rc;
-}
-
 int
 main(int argc, char **argv)
 {
@@ -3387,7 +3230,6 @@ main(int argc, char **argv)
 	uint64_t index = ULLONG_MAX;
 	struct user_param *param;
 	struct list_head params;
-	struct iscsi_rec_params rec_params;
 
 	INIT_LIST_HEAD(&params);
 	INIT_LIST_HEAD(&ifaces);
@@ -3805,38 +3647,14 @@ main(int argc, char **argv)
 				rec->session.multiple = 1;
 			}
 
-			if (!(op & OP_NONPERSISTENT)) {
-				rc = exec_node_op(op, do_login, do_logout,
-							do_show, do_rescan,
-							do_stats, info_level,
-							rec, &params);
-				if (rc)
-					goto free_info;
-			}
-			if (op == OP_UPDATE || op == OP_NONPERSISTENT) {
-				rec_params.rec = rec;
-				rec_params.params = &params;
-				rc = session_update(&rec_params, info);
-				if (rc)
-					goto free_info;
-			}
+			/* drop down to node ops */
+			rc = exec_node_op(op, do_login, do_logout, do_show,
+					  do_rescan, do_stats, info_level,
+					  rec, &params);
 free_info:
 			free(info);
 			goto out;
 		} else {
-			if (op == OP_UPDATE || op == OP_NONPERSISTENT) {
-				if (!(op & OP_NONPERSISTENT)) {
-					rc = exec_node_op(op, do_login,
-							do_logout, do_show,
-							do_rescan, do_stats,
-							info_level, rec,
-							&params);
-					if (rc)
-						goto out;
-				}
-				rc = session_update_all(&params);
-				goto out;
-			}
 			if (op == OP_NEW) {
 				log_error("session mode: Operation 'new' only "
 					  "allowed with specific session IDs");
