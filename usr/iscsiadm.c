@@ -58,6 +58,10 @@
 static char program_name[] = "iscsiadm";
 static char config_file[TARGET_NAME_MAXLEN];
 extern struct iscsi_ipc *ipc;
+static struct iscsi_rec_params {
+	struct node_rec		*rec;
+	struct list_head	*params;
+};
 
 enum iscsiadm_mode {
 	MODE_DISCOVERY,
@@ -3209,6 +3213,91 @@ ping_exit:
 	return rc;
 }
 
+static int
+session_update(struct iscsi_rec_params *rec_params, struct session_info *info)
+{
+	int rc, sid = info->sid;
+	node_rec_t *node_rec;
+	struct list_head *params = rec_params->params;
+	struct user_param *param;
+	iscsiadm_req_t req;
+	iscsiadm_req_t rsp;
+	iscsi_session_t *session;
+	int *sysfs_param;
+	char s_id[NAME_SIZE], c_id[NAME_SIZE];
+
+	if (!rec_params->rec) {
+		rec_params->rec = idbm_create_rec(info->targetname, info->tpgt,
+					info->persistent_address,
+					info->persistent_port, &info->iface, 1);
+		node_rec = rec_params->rec;
+		node_rec->session.info = info;
+		node_rec->session.sid = info->sid;
+	}
+
+	rc = verify_node_params(params, node_rec);
+	if (rc)
+		return rc;
+
+	/* set current session parameter to node_rec*/
+	node_rec->session.timeo.replacement_timeout = info->tmo.recovery_tmo;
+	node_rec->session.err_timeo.abort_timeout = info->tmo.abort_tmo;
+	node_rec->session.err_timeo.lu_reset_timeout = info->tmo.lu_reset_tmo;
+	node_rec->session.err_timeo.tgt_reset_timeout = info->tmo.tgt_reset_tmo;
+
+	snprintf(s_id, sizeof(s_id), "session%d", info->sid);
+	sysfs_get_int(s_id, "iscsi_session", "fast_abort",
+			&node_rec->session.iscsi.FastAbort);
+
+	snprintf(c_id, sizeof(c_id), "connection%d:0", info->sid);
+	sysfs_get_int(c_id, "iscsi_connection", "ping_tmo",
+			&node_rec->conn[0].timeo.noop_out_timeout);
+	sysfs_get_int(c_id, "iscsi_connection", "recv_tmo",
+			&node_rec->conn[0].timeo.noop_out_interval);
+
+	/* set option parameter to node_rec */
+	rc = idbm_node_set_rec_from_param(params, node_rec, 1);
+	if (rc) {
+		log_error("Set rec from params failed.\n");
+		return rc;
+	}
+
+	req.command = MGMT_IPC_SESSION_UPDATE;
+	req.u.session.sid = info->sid;
+	memcpy(&req.u.session.rec, node_rec, sizeof(node_rec_t));
+
+	rc = iscsid_exec_req(&req, &rsp, 1);
+	if (rc)
+		return rc;
+
+	printf("Session update [sid: %d, target: %s, portal: %s,%d]\n",
+		info->sid, info->targetname, info->persistent_address,
+		info->port);
+
+	return 0;
+}
+
+static int session_update_all(struct list_head *params)
+{
+	int rc, num_found = 0;
+	struct iscsi_rec_params rec_params;
+
+	rec_params.params = params;
+
+	rc = iscsi_sysfs_for_each_session(&rec_params, &num_found,
+					session_update, 1);
+	if (rc) {
+		log_error("Could not execute operation on all sessions: %s",
+			iscsi_err_to_str(rc));
+		goto out;
+	} else if (!num_found) {
+		log_error("No session found.");
+		rc = ISCSI_ERR_NO_OBJS_FOUND;
+	}
+out:
+	return rc;
+}
+
 int
 main(int argc, char **argv)
 {
@@ -3230,6 +3319,7 @@ main(int argc, char **argv)
 	uint64_t index = ULLONG_MAX;
 	struct user_param *param;
 	struct list_head params;
+	struct iscsi_rec_params rec_params;
 
 	INIT_LIST_HEAD(&params);
 	INIT_LIST_HEAD(&ifaces);
@@ -3647,14 +3737,38 @@ main(int argc, char **argv)
 				rec->session.multiple = 1;
 			}
 
-			/* drop down to node ops */
-			rc = exec_node_op(op, do_login, do_logout, do_show,
-					  do_rescan, do_stats, info_level,
-					  rec, &params);
+			if (!(op & OP_NONPERSISTENT)) {
+				rc = exec_node_op(op, do_login, do_logout,
+							do_show, do_rescan,
+							do_stats, info_level,
+							rec, &params);
+				if (rc)
+					goto free_info;
+			}
+			if (op == OP_UPDATE || op == OP_NONPERSISTENT) {
+				rec_params.rec = rec;
+				rec_params.params = &params;
+				rc = session_update(&rec_params, info);
+				if (rc)
+					goto free_info;
+			}
 free_info:
 			free(info);
 			goto out;
 		} else {
+			if (op == OP_UPDATE || op == OP_NONPERSISTENT) {
+				if (!(op & OP_NONPERSISTENT)) {
+					rc = exec_node_op(op, do_login,
+							do_logout, do_show,
+							do_rescan, do_stats,
+							info_level, rec,
+							&params);
+					if (rc)
+						goto out;
+				}
+				rc = session_update_all(&params);
+				goto out;
+			}
 			if (op == OP_NEW) {
 				log_error("session mode: Operation 'new' only "
 					  "allowed with specific session IDs");
