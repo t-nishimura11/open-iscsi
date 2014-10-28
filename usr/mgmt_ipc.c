@@ -295,6 +295,59 @@ mgmt_ipc_notify_common(queue_task_t *qtask, int (*handler)(int, char **))
 	return ISCSI_SUCCESS;
 }
 
+static int mgmt_ipc_session_update(queue_task_t *qtask)
+{
+	int i, sid = qtask->req.u.session.sid;
+	node_rec_t *rec = &qtask->req.u.session.rec;
+	iscsi_session_t *session;
+	struct iscsi_conn *conn;
+	int rc;
+
+	session = session_find_by_sid(sid);
+	if (!session)
+		return ISCSI_ERR_SESS_NOT_FOUND;
+
+	if (rec->session.timeo.replacement_timeout >= 0)
+		session->replacement_timeout =
+				rec->session.timeo.replacement_timeout;
+
+	if (rec->session.iscsi.FastAbort >= 0)
+		session->fast_abort = rec->session.iscsi.FastAbort;
+
+	if (rec->session.err_timeo.abort_timeout >= 0)
+		session->abort_timeout = rec->session.err_timeo.abort_timeout;
+
+	if (rec->session.err_timeo.lu_reset_timeout >= 0)
+		session->lu_reset_timeout =
+				rec->session.err_timeo.lu_reset_timeout;
+
+	if (rec->session.err_timeo.tgt_reset_timeout >= 0)
+		session->tgt_reset_timeout =
+				rec->session.err_timeo.tgt_reset_timeout;
+
+	for (i = 0; i < ISCSI_CONN_MAX; i++) {
+		conn = &session->conn[i];
+
+		if (rec->conn[i].timeo.noop_out_timeout >= 0)
+			conn->noop_out_timeout =
+				rec->conn[i].timeo.noop_out_timeout;
+
+		if (rec->conn[i].timeo.noop_out_interval >= 0)
+			conn->noop_out_interval =
+				rec->conn[i].timeo.noop_out_interval;
+	}
+
+	rc = iscsi_session_set_params(session->conn);
+	if (rc) {
+		log_error("iscsi_session_set_params(): IPC error %d session"
+			" [%02d]" , rc, sid);
+		return ISCSI_ERR_INTERNAL;
+	}
+
+	mgmt_ipc_write_rsp(qtask, ISCSI_SUCCESS);
+	return ISCSI_SUCCESS;
+}
+
 /* Replace these dummies as you implement them
    elsewhere */
 static int
@@ -529,6 +582,7 @@ static mgmt_ipc_fn_t *	mgmt_ipc_functions[__MGMT_IPC_MAX_COMMAND] = {
 [MGMT_IPC_NOTIFY_DEL_NODE]	= mgmt_ipc_notify_del_node,
 [MGMT_IPC_NOTIFY_ADD_PORTAL]	= mgmt_ipc_notify_add_portal,
 [MGMT_IPC_NOTIFY_DEL_PORTAL]	= mgmt_ipc_notify_del_portal,
+[MGMT_IPC_SESSION_UPDATE]	= mgmt_ipc_session_update,
 };
 
 void mgmt_ipc_handle(int accept_fd)
